@@ -1,0 +1,85 @@
+machine class:
+{
+        Number of machines: 16
+        CPU type: X86
+        Number of cores: 8
+        Memory: 4096
+        S-States: [35, 20, 16, 12, 6, 2, 0]
+        P-States: [5, 4, 3, 2]
+        C-States: [5, 1, 1, 0]
+        MIPS: [2000, 1600, 1200, 800]
+        GPUs: no
+}
+
+machine class:
+{
+        Number of machines: 8
+        CPU type: X86
+        Number of cores: 8
+        Memory: 32768
+        S-States: [100, 60, 40, 25, 12, 4, 0]
+        P-States: [8, 6, 4, 2]
+        C-States: [8, 2, 1, 0]
+        MIPS: [2000, 1600, 1200, 800]
+        GPUs: no
+}
+
+task class:
+{
+        Start time: 60000
+        End time: 120060000
+        Inter arrival: 30000
+        Expected runtime: 300000
+        Memory: 32
+        VM type: LINUX
+        GPU enabled: no
+        SLA type: SLA0
+        CPU type: X86
+        Task type: WEB
+        Seed: 731041
+}
+
+task class:
+{
+        Start time: 60000
+        End time: 30060000
+        Inter arrival: 62500
+        Expected runtime: 6000000
+        Memory: 32
+        VM type: LINUX
+        GPU enabled: no
+        SLA type: SLA2
+        CPU type: X86
+        Task type: HPC
+        Seed: 731042
+}
+
+task class:
+{
+        Start time: 30060000
+        End time: 60060000
+        Inter arrival: 62500
+        Expected runtime: 6000000
+        Memory: 2048
+        VM type: LINUX
+        GPU enabled: no
+        SLA type: SLA2
+        CPU type: X86
+        Task type: HPC
+        Seed: 731042
+}
+
+task class:
+{
+        Start time: 60060000
+        End time: 90060000
+        Inter arrival: 62500
+        Expected runtime: 6000000
+        Memory: 32
+        VM type: LINUX
+        GPU enabled: no
+        SLA type: SLA2
+        CPU type: X86
+        Task type: HPC
+        Seed: 731042
+}
