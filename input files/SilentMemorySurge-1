@@ -1,0 +1,126 @@
+# SilentMemorySurge-1: a memory surge without a CPU surge.
+# Proposed class test case. Design assistance: OpenAI Codex.
+#
+# Question: can a scheduler protect web SLAs when RAM becomes the bottleneck,
+# even though batch arrival rate and expected CPU work have not increased?
+#
+# All machines are X86, all VMs are LINUX, and no GPUs are used, so differences
+# in architecture, OS compatibility, and acceleration do not mask the effect.
+# The first 16 machines are economical but have little RAM. The last 8 have
+# eight times the RAM, identical performance, and a higher power cost.
+#
+# Batch arrival windows (seconds; input values below are microseconds):
+#   0.06-30.06: 32 MB jobs; economical hosts are attractive.
+#  30.06-60.06: 2048 MB jobs; CPU-only consolidation risks memory overflow.
+#  60.06-90.06: 32 MB jobs again; reclaim expensive hosts as old jobs finish.
+#  90.06-120.06: only the steady web stream remains; test energy recovery.
+# End time stops arrivals, not execution. Jobs can overlap phase boundaries.
+#
+# The three batch classes use identical seeds, durations, arrival intervals,
+# runtimes, SLAs, and VM types. Only memory changes, apart from time offsets.
+# Arrivals are statistical, not synchronized or guaranteed overload events.
+# At nominal values and P0, batch work needs about 48 cores, and web work
+# about 5 more, versus 192 installed cores. This is not a CPU saturation test.
+# Nominal batch RAM rises from about 1.5 GiB to 96 GiB; economical hosts
+# together have only 64 GiB. These are sizing estimates, not measured output.
+# Two nominal 2048 MB tasks already fill a 4096 MB host BEFORE the 8 MB VM
+# overhead. Actual generated task sizes must be checked through the API.
+# Each individual nominal task fits either host class; placement is the issue.
+#
+# Useful comparisons: CPU-only packing, memory-aware packing, always-on
+# spreading, and memory-aware placement with idle-host sleep. Compare SLA0
+# and SLA2 violations, total energy, and completion time. Instrument memory
+# warnings and powered-on hosts to explain the results. Avoid memorizing the
+# phase boundaries in a scheduler; react to actual task and machine metadata.
+# The supplied skeleton can read this format but is not a reference policy:
+# it uses only the first 16 hosts and contains a demonstration migration.
+
+machine class:
+{
+        Number of machines: 16
+        CPU type: X86
+        Number of cores: 8
+        Memory: 4096
+        S-States: [35, 20, 16, 12, 6, 2, 0]
+        P-States: [5, 4, 3, 2]
+        C-States: [5, 1, 1, 0]
+        MIPS: [2000, 1600, 1200, 800]
+        GPUs: no
+}
+
+machine class:
+{
+        Number of machines: 8
+        CPU type: X86
+        Number of cores: 8
+        Memory: 32768
+        S-States: [100, 60, 40, 25, 12, 4, 0]
+        P-States: [8, 6, 4, 2]
+        C-States: [8, 2, 1, 0]
+        MIPS: [2000, 1600, 1200, 800]
+        GPUs: no
+}
+
+# Steady latency-sensitive traffic spans all batch phases and the drain.
+task class:
+{
+        Start time: 60000
+        End time: 120060000
+        Inter arrival: 30000
+        Expected runtime: 300000
+        Memory: 32
+        VM type: LINUX
+        GPU enabled: no
+        SLA type: SLA0
+        CPU type: X86
+        Task type: WEB
+        Seed: 731041
+}
+
+# Phase A: CPU-heavy, memory-light batch work.
+task class:
+{
+        Start time: 60000
+        End time: 30060000
+        Inter arrival: 62500
+        Expected runtime: 6000000
+        Memory: 32
+        VM type: LINUX
+        GPU enabled: no
+        SLA type: SLA2
+        CPU type: X86
+        Task type: HPC
+        Seed: 731042
+}
+
+# Phase B: identical offered CPU work, 64 times the nominal memory per job.
+task class:
+{
+        Start time: 30060000
+        End time: 60060000
+        Inter arrival: 62500
+        Expected runtime: 6000000
+        Memory: 2048
+        VM type: LINUX
+        GPU enabled: no
+        SLA type: SLA2
+        CPU type: X86
+        Task type: HPC
+        Seed: 731042
+}
+
+# Phase C: return to Phase A's workload; test release of expensive capacity.
+task class:
+{
+        Start time: 60060000
+        End time: 90060000
+        Inter arrival: 62500
+        Expected runtime: 6000000
+        Memory: 32
+        VM type: LINUX
+        GPU enabled: no
+        SLA type: SLA2
+        CPU type: X86
+        Task type: HPC
+        Seed: 731042
+}
