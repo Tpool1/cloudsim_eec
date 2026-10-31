@@ -6,9 +6,87 @@
 //
 
 #include "Scheduler.hpp"
+#include <algorithm>
+#include <deque>
 
 static bool migrating = false;
 static unsigned active_machines = 16;
+
+// TODO: double check these classes
+class LatencyMonitor {
+    struct Sample { Time_t time; double latency; };
+    deque<Sample> samples;
+    double total = 0;
+    double recent_total = 0;
+    unsigned recent_count = 0;
+public:
+    void Record(Time_t now, const TaskInfo_t& task) {
+        if (task.required_sla == SLA3 || task.target_completion <= task.arrival || now < task.arrival)
+            return;
+        double latency = double(now - task.arrival) / (task.target_completion - task.arrival);
+        samples.push_back({now, latency});
+        total += latency;
+        recent_total += latency;
+        ++recent_count;
+    }
+
+    bool Read(Time_t now, double& average, double& instantaneous) {
+        while (!samples.empty() && now - samples.front().time > 30000000) {
+            total -= samples.front().latency;
+            samples.pop_front();
+        }
+        bool available = !samples.empty() && recent_count != 0;
+        if (available) {
+            average = total / samples.size();
+            instantaneous = recent_total / recent_count;
+        }
+        recent_total = 0;
+        recent_count = 0;
+        return available;
+    }
+};
+
+class Controller {
+    double power = 100;
+    Time_t last_check = 0;
+    Time_t emergency_until = 0;
+public:
+    void Check(Time_t now, LatencyMonitor& monitor, const vector<MachineId_t>& machines) {
+        if (now - last_check < 5000000) return;
+        last_check = now;
+        double average, instantaneous;
+        bool available = monitor.Read(now, average, instantaneous);
+        // shortcut: normalized task deadlines approximate a shared SLO, calibrate for a real workload.
+        const double target = 0.95;
+        if (available && average > target) {
+            power = 100;
+            emergency_until = now + 300000000;
+        } else if (now < emergency_until || !available || instantaneous > 1.35 * target) {
+            power = 100;
+        } else if (instantaneous > target) {
+            power = min(100.0, power + 7);
+        } else if (instantaneous < 0.60 * target) {
+            power = max(0.0, power - 3);
+        } else if (instantaneous < 0.85 * target) {
+            power = max(0.0, power - 1);
+        }
+
+        for (MachineId_t machine : machines) {
+            MachineInfo_t info = Machine_GetInfo(machine);
+            if (info.p_states.empty() || info.p_states[0] == 0) continue;
+            // shortcut: discrete P-states approximate RAPL, upgrade when a power-cap API exists.
+            unsigned state = 0;
+            for (unsigned i = 1; i < min<unsigned>(P_STATES, info.p_states.size()); ++i)
+                if (100.0 * info.p_states[i] >= power * info.p_states[0]) state = i;
+            if (info.p_state != static_cast<CPUPerformance_t>(state))
+                for (unsigned core = 0; core < info.num_cpus; ++core)
+                    Machine_SetCorePerformance(machine, core, static_cast<CPUPerformance_t>(state));
+        }
+    }
+};
+
+static LatencyMonitor latency_monitor;
+static Controller controller;
 
 void Scheduler::Init() {
     // Find the parameters of the clusters
@@ -66,6 +144,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     // Other possibilities as desired
     Priority_t priority = (task_id == 0 || task_id == 64)? HIGH_PRIORITY : MID_PRIORITY;
     if(migrating) {
+        // Avoid putting the task on the vm that's migrating
         VM_AddTask(vms[0], task_id, priority);
     }
     else {
@@ -78,6 +157,7 @@ void Scheduler::PeriodicCheck(Time_t now) {
     // SchedulerCheck is called periodically by the simulator to allow you to monitor, make decisions, adjustments, etc.
     // Unlike the other invocations of the scheduler, this one doesn't report any specific event
     // Recommendation: Take advantage of this function to do some monitoring and adjustments as necessary
+    controller.Check(now, latency_monitor, machines);
 }
 
 void Scheduler::Shutdown(Time_t time) {
@@ -96,6 +176,7 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     // Do any bookkeeping necessary for the data structures
     // Decide if a machine is to be turned off, slowed down, or VMs to be migrated according to your policy
     // This is an opportunity to make any adjustments to optimize performance/energy
+    latency_monitor.Record(now, GetTaskInfo(task_id));
     SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now), 4);
 }
 
