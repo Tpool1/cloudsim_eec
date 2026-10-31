@@ -5,6 +5,7 @@
 //  Created by ELMOOTAZBELLAH ELNOZAHY on 10/20/24.
 //
 
+#include <cstdint>
 #include "Scheduler.hpp"
 #include <algorithm>
 #include <deque>
