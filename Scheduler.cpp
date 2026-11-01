@@ -9,6 +9,7 @@
 #include "Scheduler.hpp"
 #include <algorithm>
 #include <deque>
+#include <limits>
 
 static bool migrating = false;
 static unsigned active_machines = 16;
@@ -126,31 +127,47 @@ void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
 }
 
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
-    // Get the task parameters
-    //  IsGPUCapable(task_id);
-    //  GetMemory(task_id);
-    //  RequiredVMType(task_id);
-    //  RequiredSLA(task_id);
-    //  RequiredCPUType(task_id);
-    // Decide to attach the task to an existing VM, 
-    //      vm.AddTask(taskid, Priority_T priority); or
-    // Create a new VM, attach the VM to a machine
-    //      VM vm(type of the VM)
-    //      vm.Attach(machine_id);
-    //      vm.AddTask(taskid, Priority_t priority) or
-    // Turn on a machine, create a new VM, attach it to the VM, then add the task
-    //
-    // Turn on a machine, migrate an existing VM from a loaded machine....
-    //
-    // Other possibilities as desired
     Priority_t priority = (task_id == 0 || task_id == 64)? HIGH_PRIORITY : MID_PRIORITY;
-    if(migrating) {
-        // Avoid putting the task on the vm that's migrating
-        VM_AddTask(vms[0], task_id, priority);
+    TaskInfo_t task = GetTaskInfo(task_id);
+    auto best_vm = vms.end();
+    double lowest_work = numeric_limits<double>::infinity();
+    for (unsigned offset = 0; offset < vms.size(); ++offset) {
+        auto vm = vms.begin() + (task_id % vms.size() + offset) % vms.size();
+        if (migrating && *vm == 1) continue;
+        VMInfo_t info = VM_GetInfo(*vm);
+        MachineInfo_t machine = Machine_GetInfo(info.machine_id);
+        unsigned state = machine.p_state;
+        if (info.vm_type != task.required_vm || info.cpu != task.required_cpu ||
+            machine.cpu != task.required_cpu || machine.s_state != S0 ||
+            machine.memory_used > machine.memory_size ||
+            task.required_memory > machine.memory_size - machine.memory_used ||
+            machine.num_cpus == 0 || state >= machine.performance.size() ||
+            machine.performance[state] == 0)
+            continue;
+
+        double work = 0;
+        // Include all VMs on the current host, including both VMs after migration.
+        for (VMId_t other : vms) {
+            VMInfo_t guest = VM_GetInfo(other);
+            if (guest.machine_id != info.machine_id) continue;
+            for (TaskId_t queued : guest.active_tasks) {
+                TaskInfo_t pending = GetTaskInfo(queued);
+                double rate = machine.performance[state] * 1e6;
+                if (pending.gpu_capable && machine.gpus) rate *= 20;
+                work += double(pending.remaining_instructions) / rate;
+            }
+        }
+        work /= machine.num_cpus;
+        if (work < lowest_work) {
+            best_vm = vm;
+            lowest_work = work;
+        }
     }
-    else {
-        VM_AddTask(vms[task_id % active_machines], task_id, priority);
-    }// Skeleton code, you need to change it according to your algorithm
+    if (best_vm == vms.end()) {
+        ThrowException("Scheduler::NewTask(): No eligible VM for task", task_id);
+        return;
+    }
+    VM_AddTask(*best_vm, task_id, priority);
 }
 
 void Scheduler::PeriodicCheck(Time_t now) {
